@@ -11,33 +11,26 @@ def preprocess_entity(entity: Dict[str, Any]) -> str:
     """Convert FTM entity to a document string for embedding."""
     parts = []
     
-    # Add basic properties
-    if entity.get('name'):
-        parts.append(f"Name: {entity['name']}")
+    # Key textual properties as specified in CLAUDE.md
+    properties = [
+        'appearance', 'birthDate', 'birthPlace', 'country', 'deathDate', 
+        'description', 'education', 'ethnicity', 'firstName', 'idNumber', 
+        'lastName', 'middleName', 'motherName', 'name', 'nameSuffix', 
+        'nationality', 'passportNumber', 'political', 'position', 'religion', 
+        'secondName', 'spokenLanguage', 'taxNumber', 'title', 'weight'
+    ]
     
-    if entity.get('description'):
-        parts.append(f"Description: {entity['description']}")
-    
-    if entity.get('purpose'):
-        parts.append(f"Purpose: {entity['purpose']}")
-    
-    if entity.get('jurisdiction'):
-        parts.append(f"Jurisdiction: {entity['jurisdiction']}")
-    
-    if entity.get('schema'):
-        parts.append(f"Schema: {entity['schema']}")
-    
-    # Handle relationships and linked entities
-    for prop_name, prop_value in entity.items():
-        if prop_name in ['name', 'description', 'purpose', 'jurisdiction', 'schema']:
-            continue
-            
-        if isinstance(prop_value, list):
-            for item in prop_value:
-                if isinstance(item, str) and item.strip():
-                    parts.append(f"{prop_name}: {item}")
-        elif isinstance(prop_value, str) and prop_value.strip():
-            parts.append(f"{prop_name}: {prop_value}")
+    for prop in properties:
+        value = entity.get(prop)
+        if value:
+            if isinstance(value, list):
+                for item in value:
+                    if isinstance(item, str) and item.strip():
+                        parts.append(f"{prop}: {item}")
+            elif isinstance(value, str) and value.strip():
+                parts.append(f"{prop}: {value}")
+            elif value is not None:  # Handle non-string values like numbers
+                parts.append(f"{prop}: {str(value)}")
     
     return " | ".join(parts) if parts else f"Entity {entity.get('id', 'unknown')}"
 
