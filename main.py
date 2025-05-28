@@ -272,6 +272,15 @@ def embed_entities(json_file: Path, model: str, output_dir: str):
     
     click.echo(f"Processing {len(entities)} entities...")
     
+    # Generate stories for each entity
+    stories = []
+    for entity in entities:
+        story = preprocess_entity(entity)
+        stories.append({
+            "id": entity.get("id"),
+            "story": story
+        })
+    
     # Create embeddings
     embeddings, transformer_model = create_embeddings(entities, model)
     click.echo(f"Generated embeddings with shape: {embeddings.shape}")
@@ -282,16 +291,21 @@ def embed_entities(json_file: Path, model: str, output_dir: str):
     
     # Save everything
     entities_file = output_path / "entities.json"
+    stories_file = output_path / "stories.json"
     embeddings_file = output_path / "embeddings.npy"
     index_file = output_path / "faiss_index.bin"
     
     with open(entities_file, 'w') as f:
         json.dump(entities, f, indent=2)
     
+    with open(stories_file, 'w') as f:
+        json.dump(stories, f, indent=2)
+    
     np.save(embeddings_file, embeddings)
     faiss.write_index(index, str(index_file))
     
     click.echo(f"Saved entities to: {entities_file}")
+    click.echo(f"Saved stories to: {stories_file}")
     click.echo(f"Saved embeddings to: {embeddings_file}")
     click.echo(f"Saved FAISS index to: {index_file}")
     click.echo(f"Vector store created successfully with {len(entities)} entities!")
