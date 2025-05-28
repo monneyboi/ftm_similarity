@@ -1,21 +1,21 @@
 # FTM Similarity
 
-A proof of concept for calculating similarity between FollowTheMoney (FTM) entities using embeddings.
+A proof of concept for calculating similarity between FollowTheMoney (FTM) entities using property-based embeddings with weighted averaging.
 
 ## Overview
 
 This project demonstrates how to:
 - Load FTM entities from JSONL files
-- Preprocess entities into human-readable stories for embedding
-- Generate embeddings using sentence transformers
-- Store vectors in FAISS for efficient similarity search
-- Query for similar entities
+- Extract and preprocess individual entity properties for separate embedding
+- Generate property-specific embeddings using sentence transformers
+- Calculate weighted similarity scores based on property importance
+- Query for similar entities using weighted averaging of property similarities
 
 ## Commands
 
 ### embed
 
-Load FTM entities from JSONL file and create embeddings with FAISS index.
+Load FTM entities from JSONL file and create property-based embeddings.
 
 ```bash
 python main.py embed <json_file> [OPTIONS]
@@ -34,14 +34,16 @@ python main.py embed entities.jsonl --model sentence-transformers/all-MiniLM-L6-
 ```
 
 **Output:**
-- `entities.json`: Original entity data
-- `stories.json`: Preprocessed entity stories
-- `embeddings.npy`: Entity embedding vectors
-- `faiss_index.bin`: FAISS similarity search index
+- `embeddings.pkl`: Property-specific embedding vectors for each entity
+- `metadata.pkl`: Original entity data and preprocessed properties
+- `weights.pkl`: Property importance weights for similarity calculation
+
+**Target Properties:**
+The system extracts and embeds 25 specific properties including name, description, nationality, birthPlace, education, political affiliation, appearance, and others. Missing composite properties (like 'name') are automatically constructed from component parts (firstName, lastName, etc.).
 
 ### search
 
-Search for entities similar to a given person ID.
+Search for entities similar to a given person ID using weighted property similarity.
 
 ```bash
 python main.py search <person_id> [OPTIONS]
@@ -61,14 +63,15 @@ python main.py search person1 --top-k 10 --embeddings-dir ./embeddings
 
 **Output:**
 Displays the top-k most similar entities with:
-- Entity ID and similarity score
-- Name and key details (birth date, nationality, position)
-- Preprocessed story excerpt
+- Entity ID and weighted similarity score (0-1 scale)
+- Name, description, and nationality
+- Detailed breakdown of property-level similarities and their weighted contributions
+- Number of common properties used in calculation
 
 ## Requirements
 
 - Python 3.12+
-- Dependencies: `click`, `sentence-transformers`, `faiss-cpu`, `numpy`
+- Dependencies: `click`, `sentence-transformers`, `numpy`
 
 ## Input Format
 
