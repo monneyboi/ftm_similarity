@@ -1,7 +1,6 @@
 import json
 import click
 import numpy as np
-import faiss
 import pickle
 from sentence_transformers import SentenceTransformer
 from pathlib import Path
@@ -85,30 +84,30 @@ def create_composite_properties(properties: Dict[str, Any]) -> Dict[str, Any]:
     """Create composite properties from more detailed properties if missing."""
     # Create a copy to avoid modifying the original
     enhanced_properties = properties.copy()
-    
+
     # Create 'name' from firstName, middleName, lastName, nameSuffix if 'name' is missing
     if "name" not in properties or not properties["name"]:
         name_parts = []
-        
+
         for name_prop in ["firstName", "middleName", "lastName", "nameSuffix"]:
             if name_prop in properties and properties[name_prop]:
                 processed = preprocess_property(properties[name_prop])
                 if processed:
                     name_parts.append(processed)
-        
+
         if name_parts:
             enhanced_properties["name"] = " ".join(name_parts)
-    
+
     return enhanced_properties
 
 
 def extract_entity_properties(entity: Dict[str, Any]) -> Dict[str, str]:
     """Extract and preprocess target properties from an entity."""
     properties = entity.get("properties", {})
-    
+
     # First, create composite properties if missing
     enhanced_properties = create_composite_properties(properties)
-    
+
     extracted = {}
 
     for prop in TARGET_PROPERTIES:
