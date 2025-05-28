@@ -82,6 +82,14 @@ JSONL file with one FTM entity per line:
 {"id": "person2", "schema": "Person", "properties": {"firstName": "Jean", "lastName": "Dupont", "country": "FR", "nationality": "FR", "birthDate": "1982-03-22", "description": "Tech entrepreneur"}}
 ```
 
+## How It Works
+
+1. **Property Extraction**: Extracts 25 target properties from each entity, creating composite properties (like 'name' from firstName/lastName) when needed
+2. **Individual Embedding**: Each property value is embedded separately using sentence transformers
+3. **Weighted Similarity**: Uses predefined weights (name: 0.3, description: 0.2, nationality: 0.15, etc.) to calculate overall similarity
+4. **Cosine Similarity**: Computes cosine similarity between corresponding property embeddings
+5. **Normalized Scoring**: Final similarity scores are normalized by the total weight of common properties
+
 ## Workflow
 
 1. **Prepare data**: Create JSONL file with FTM entities
