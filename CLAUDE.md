@@ -6,11 +6,11 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 This is a Python project called "ftm-similarity" built with modern Python packaging (pyproject.toml).
 
-**Project Goal:** Create a Proof of Concept (POC) for calculating similarity between FollowTheMoney (FTM) entities using embeddings.
+**Project Goal:** Create a Proof of Concept (POC) for calculating similarity between FollowTheMoney (FTM) entities using property-based embeddings with weighted averaging.
 
 **Input:** A JSON file containing 400 FTM entities.
 
-**Output:** A Python script that demonstrates preprocessing, embedding, storing, and querying for similar entities.
+**Output:** A Python script that demonstrates preprocessing, embedding individual properties, storing, and querying for similar entities using weighted similarity scores.
 
 **Core Steps for the Coding Model:**
 
@@ -18,40 +18,61 @@ This is a Python project called "ftm-similarity" built with modern Python packag
 
     - Read the FTM entities from the provided JSON file.
 
-2.  **Entity Preprocessing (Document Creation for Embedding):**
+2.  **Property-Based Preprocessing:**
 
-    - **Objective:** Transform each structured FTM entity into a single, comprehensive string (a "document") suitable for a sentence transformer.
+    - **Objective:** Instead of creating single document strings, process each property individually for separate embedding.
+    - **Target Properties:** appearance, birthDate, birthPlace, country, deathDate, description, education, ethnicity, firstName, idNumber, lastName, middleName, motherName, name, nameSuffix, nationality, passportNumber, political, position, religion, secondName, spokenLanguage, taxNumber, title, weight
     - **Process:**
+      - For each entity, extract and clean individual property values
+      - Handle missing or `None` values gracefully (e.g., skip property or use empty string)
+      - Group properties by type (e.g., textual vs. categorical vs. date-based)
 
-      - For each entity, concatenate key textual properties: appearance, birthDate, birthPlace, country, deathDate, description, education, ethnicity, firstName, idNumber, lastName, middleName, motherName, name, nameSuffix, nationality, passportNumber, political, position, religion, secondName, spokenLanguage, taxNumber, title, weight
+3.  **Property-Specific Embedding:**
 
-      - Handle missing or `None` values gracefully (e.g., skip or use an empty string).
+    - **Model:** Use a pre-trained sentence transformer model (e.g., `sentence-transformers/all-MiniLM-L6-v2` or similar)
+    - **Process:**
+      - Generate separate embedding vectors for each property that has a meaningful value
+      - For textual properties (description, appearance, education): embed directly
+      - For categorical properties (country, nationality, political): embed as-is or with context
+      - For names (firstName, lastName, name): embed individually
+      - Store embeddings in a structured format: `{entity_id: {property_name: embedding_vector}}`
 
-3.  **Entity Embedding:**
+4.  **Weighted Similarity Configuration:**
 
-    - **Model:** Use a pre-trained sentence transformer model (e.g., `sentence-transformers/all-MiniLM-L6-v2` or a similar small, efficient model).
-    - **Process:** Generate a fixed-size embedding vector for each preprocessed entity document string.
+    - **Property Weights:** Define importance weights for different properties, e.g.:
+      - High importance: name (0.3), description (0.2), nationality (0.15)
+      - Medium importance: birthPlace (0.1), education (0.1), political (0.05)
+      - Lower importance: appearance (0.05), other properties (0.05 total)
+    - **Weights should sum to 1.0**
+    - Make weights configurable/adjustable
 
-4.  **Vector Storage:**
+5.  **Vector Storage:**
 
-    - **Choice:** Use an in-memory vector store. `FAISS` is recommended for efficient similarity search, or a simple list of `(entity_id, original_entity_data, embedding_vector)` tuples if FAISS is too complex for the time constraint.
-    - **If FAISS:** Create a FAISS index (e.g., `IndexFlatL2` or `IndexFlatIP`) and add the embeddings.
+    - **Choice:** Use an in-memory structure to store property-specific embeddings
+    - **Structure:** Dictionary or class-based approach: `{entity_id: {property: embedding, ...}, original_data: {...}}`
+    - **Optional:** Use FAISS for each property type if performance optimization is needed
 
-5.  **Similarity Query:**
-    - **Selection:** Given an arbitrary entity from the dataset to use as a query.
-    - **Preprocessing:** Preprocess this query entity into its document string using the _exact same logic_ as step 2.
-    - **Embedding:** Embed the query document using the _exact same model_ as step 3.
-    - **Search:**
-      - If using FAISS: Perform a k-nearest neighbors search (`index.search()`).
-      - If using a list: Calculate cosine similarity between the query embedding and all stored embeddings.
-    - **Result:** Return the top N most similar entities (e.g., Top 5 or Top 10), including their original data or ID and similarity score.
+6.  **Weighted Similarity Query:**
+    - **Selection:** Given an arbitrary entity from the dataset to use as a query
+    - **Property Embedding:** Embed each property of the query entity using the same models/logic as step 3
+    - **Similarity Calculation:**
+      - For each candidate entity, calculate cosine similarity between corresponding property embeddings
+      - Apply weighted average: `total_similarity = Σ(weight_i × similarity_i)` for all matching properties
+      - Handle cases where properties are missing in either query or candidate entity
+    - **Search:** Rank all entities by their weighted similarity scores
+    - **Result:** Return the top N most similar entities (e.g., Top 5 or Top 10), including:
+      - Original entity data or ID
+      - Overall weighted similarity score
+      - Breakdown of individual property similarities (optional, for debugging)
 
 **Constraints & Best Practices:**
 
-- Handle common errors (e.g., file not found).
-- Focus on clear, modular code.
-- Avoid external databases unless explicitly simple setup instructions can be provided (FAISS avoids this).
-- No need for production-ready features (logging, extensive error handling, etc.).
+- Handle common errors (e.g., file not found, missing properties)
+- Focus on clear, modular code with separate functions for each property type
+- Make the weighting system easily configurable
+- Avoid external databases unless explicitly simple setup instructions can be provided
+- No need for production-ready features (logging, extensive error handling, etc.)
+- Consider normalizing similarity scores to [0, 1] range for interpretability
 
 ## Development Commands
 
