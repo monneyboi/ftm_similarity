@@ -22,8 +22,9 @@ This is a Python project called "ftm-similarity" built with modern Python packag
 
     - **Objective:** Transform each structured FTM entity into a single, comprehensive string (a "document") suitable for a sentence transformer.
     - **Process:**
-      - For each entity, concatenate key textual properties (e.g., `name`, `description`, `purpose`, `jurisdiction`, `schema`).
-      - **Crucial for relationships:** Identify and extract relevant information from linked entities/relationships (e.g., `parties`, `targets`, `relations`). Incorporate their names, roles, and possibly schema types into the main entity's document string. For instance, if an entity "funds" another entity, the document might contain "funds entity_name (entity_schema)".
+
+      - For each entity, concatenate key textual properties: appearance, birthDate, birthPlace, country, deathDate, description, education, ethnicity, firstName, idNumber, lastName, middleName, motherName, name, nameSuffix, nationality, passportNumber, political, position, religion, secondName, spokenLanguage, taxNumber, title, weight
+
       - Handle missing or `None` values gracefully (e.g., skip or use an empty string).
 
 3.  **Entity Embedding:**
