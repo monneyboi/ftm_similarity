@@ -253,11 +253,67 @@ def create_faiss_index(embeddings: np.ndarray) -> faiss.IndexFlatL2:
     return index
 
 
-@click.command()
+def search_similar_entities(person_id: str, embeddings_dir: Path, top_k: int = 5) -> List[Tuple[Dict[str, Any], float]]:
+    """Search for similar entities to a given person ID."""
+    # Load all data
+    entities_file = embeddings_dir / "entities.json"
+    embeddings_file = embeddings_dir / "embeddings.npy"
+    index_file = embeddings_dir / "faiss_index.bin"
+    
+    if not all(f.exists() for f in [entities_file, embeddings_file, index_file]):
+        raise FileNotFoundError("Embeddings directory missing required files. Run embed command first.")
+    
+    # Load entities and find the query entity
+    with open(entities_file, 'r') as f:
+        entities = json.load(f)
+    
+    query_entity = None
+    query_idx = None
+    for idx, entity in enumerate(entities):
+        if entity.get('id') == person_id:
+            query_entity = entity
+            query_idx = idx
+            break
+    
+    if query_entity is None:
+        raise ValueError(f"Entity with ID '{person_id}' not found in dataset")
+    
+    # Load embeddings and FAISS index
+    embeddings = np.load(embeddings_file)
+    index = faiss.read_index(str(index_file))
+    
+    # Get the query embedding
+    query_embedding = embeddings[query_idx].reshape(1, -1).astype('float32')
+    
+    # Search for similar entities (k+1 to exclude the query itself)
+    distances, indices = index.search(query_embedding, top_k + 1)
+    
+    # Prepare results (skip the first result if it's the query entity itself)
+    results = []
+    for i, (dist, idx) in enumerate(zip(distances[0], indices[0])):
+        if idx == query_idx:  # Skip the query entity itself
+            continue
+        
+        similarity_score = 1.0 / (1.0 + dist)  # Convert L2 distance to similarity score
+        results.append((entities[idx], similarity_score))
+        
+        if len(results) == top_k:
+            break
+    
+    return results
+
+
+@click.group()
+def cli():
+    """FTM Entity Similarity Tool"""
+    pass
+
+
+@cli.command()
 @click.argument('json_file', type=click.Path(exists=True, path_type=Path))
 @click.option('--model', default="sentence-transformers/all-MiniLM-L6-v2", help="Sentence transformer model to use")
 @click.option('--output-dir', default="./embeddings", help="Directory to save embeddings and index")
-def embed_entities(json_file: Path, model: str, output_dir: str):
+def embed(json_file: Path, model: str, output_dir: str):
     """Load FTM entities from JSONL file and create embeddings with FAISS index."""
     output_path = Path(output_dir)
     output_path.mkdir(exist_ok=True)
@@ -311,5 +367,53 @@ def embed_entities(json_file: Path, model: str, output_dir: str):
     click.echo(f"Vector store created successfully with {len(entities)} entities!")
 
 
+@cli.command()
+@click.argument('person_id')
+@click.option('--embeddings-dir', default="./embeddings", help="Directory containing embeddings and index")
+@click.option('--top-k', default=5, help="Number of similar entities to return")
+def search(person_id: str, embeddings_dir: str, top_k: int):
+    """Search for entities similar to the given person ID."""
+    try:
+        embeddings_path = Path(embeddings_dir)
+        results = search_similar_entities(person_id, embeddings_path, top_k)
+        
+        click.echo(f"\nTop {len(results)} entities similar to '{person_id}':")
+        click.echo("=" * 60)
+        
+        for i, (entity, score) in enumerate(results, 1):
+            entity_id = entity.get('id', 'Unknown')
+            properties = entity.get('properties', {})
+            name = properties.get('name') or _get_full_name(entity) or 'Unnamed'
+            
+            click.echo(f"\n{i}. {entity_id} (Similarity: {score:.4f})")
+            click.echo(f"   Name: {name}")
+            
+            # Show key details
+            details = []
+            if properties.get('birthDate'):
+                details.append(f"Born: {properties['birthDate']}")
+            if properties.get('nationality'):
+                details.append(f"Nationality: {properties['nationality']}")
+            if properties.get('position'):
+                details.append(f"Position: {properties['position']}")
+            
+            if details:
+                click.echo(f"   Details: {' | '.join(details)}")
+            
+            # Show preprocessing story for context
+            story = preprocess_entity(entity)
+            if len(story) > 150:
+                story = story[:150] + "..."
+            click.echo(f"   Story: {story}")
+            
+    except FileNotFoundError as e:
+        click.echo(f"Error: {e}", err=True)
+        click.echo("Run 'python main.py embed <json_file>' first to create embeddings.", err=True)
+    except ValueError as e:
+        click.echo(f"Error: {e}", err=True)
+    except Exception as e:
+        click.echo(f"Unexpected error: {e}", err=True)
+
+
 if __name__ == "__main__":
-    embed_entities()
+    cli()
