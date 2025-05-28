@@ -2,305 +2,91 @@ import json
 import click
 import numpy as np
 import faiss
+import pickle
 from sentence_transformers import SentenceTransformer
 from pathlib import Path
-from typing import List, Dict, Any, Tuple
+from typing import List, Dict, Any, Tuple, Optional
 
 
-def preprocess_entity(entity: Dict[str, Any]) -> str:
-    """Convert FTM entity to a human-readable story for embedding."""
-    story_parts = []
-    
-    # Extract key information
-    name = _get_full_name(entity)
-    birth_info = _get_birth_info(entity)
-    death_info = _get_death_info(entity)
-    location_info = _get_location_info(entity)
-    professional_info = _get_professional_info(entity)
-    personal_info = _get_personal_info(entity)
-    identification_info = _get_identification_info(entity)
-    
-    # Build the story
-    if name:
-        story_parts.append(f"This is {name}.")
-    
-    if birth_info:
-        story_parts.append(birth_info)
-    
-    if location_info:
-        story_parts.append(location_info)
-    
-    if professional_info:
-        story_parts.append(professional_info)
-    
-    if personal_info:
-        story_parts.append(personal_info)
-    
-    if death_info:
-        story_parts.append(death_info)
-    
-    if identification_info:
-        story_parts.append(identification_info)
-    
-    # Add description if available
-    properties = entity.get('properties', {})
-    description = properties.get('description')
-    if description:
-        if isinstance(description, list):
-            for desc in description:
-                if isinstance(desc, str) and desc.strip():
-                    story_parts.append(desc.strip())
-        elif isinstance(description, str) and description.strip():
-            story_parts.append(description.strip())
-    
-    return " ".join(story_parts) if story_parts else f"Unknown entity {entity.get('id', '')}"
+# Target properties for embedding as specified in CLAUDE.md
+TARGET_PROPERTIES = [
+    "appearance", "birthDate", "birthPlace", "country", "deathDate", "description",
+    "education", "ethnicity", "firstName", "idNumber", "lastName", "middleName",
+    "motherName", "name", "nameSuffix", "nationality", "passportNumber", "political",
+    "position", "religion", "secondName", "spokenLanguage", "taxNumber", "title", "weight"
+]
+
+# Property weights for similarity calculation
+PROPERTY_WEIGHTS = {
+    "name": 0.3,
+    "description": 0.2,
+    "nationality": 0.15,
+    "birthPlace": 0.1,
+    "education": 0.1,
+    "political": 0.05,
+    "appearance": 0.05,
+    # Other properties share remaining 0.05
+    "firstName": 0.01,
+    "lastName": 0.01,
+    "country": 0.01,
+    "birthDate": 0.01,
+    "position": 0.01
+}
 
 
-def _get_full_name(entity: Dict[str, Any]) -> str:
-    """Construct full name from name components."""
-    properties = entity.get('properties', {})
-    name_parts = []
-    
-    # Try main name first
-    if properties.get('name'):
-        return str(properties['name'])
-    
-    # Build from components
-    title = properties.get('title')
-    if title:
-        name_parts.append(str(title))
-    
-    first_name = properties.get('firstName')
-    if first_name:
-        name_parts.append(str(first_name))
-    
-    middle_name = properties.get('middleName')
-    if middle_name:
-        name_parts.append(str(middle_name))
-    
-    second_name = properties.get('secondName')
-    if second_name:
-        name_parts.append(str(second_name))
-    
-    last_name = properties.get('lastName')
-    if last_name:
-        name_parts.append(str(last_name))
-    
-    suffix = properties.get('nameSuffix')
-    if suffix:
-        name_parts.append(str(suffix))
-    
-    return " ".join(name_parts) if name_parts else ""
+def load_entities(json_file: Path) -> List[Dict[str, Any]]:
+    """Load FTM entities from JSON file."""
+    entities = []
+    with open(json_file, 'r', encoding='utf-8') as f:
+        for line in f:
+            line = line.strip()
+            if line:
+                entity = json.loads(line)
+                entities.append(entity)
+    return entities
 
 
-def _get_birth_info(entity: Dict[str, Any]) -> str:
-    """Create birth information sentence."""
-    properties = entity.get('properties', {})
-    birth_date = properties.get('birthDate')
-    birth_place = properties.get('birthPlace')
+def preprocess_property(value: Any) -> Optional[str]:
+    """Clean and preprocess property values for embedding."""
+    if value is None:
+        return None
     
-    if birth_date and birth_place:
-        return f"Born on {birth_date} in {birth_place}."
-    elif birth_date:
-        return f"Born on {birth_date}."
-    elif birth_place:
-        return f"Born in {birth_place}."
+    if isinstance(value, list):
+        if not value:
+            return None
+        value = value[0] if len(value) == 1 else " | ".join(str(v) for v in value)
     
-    return ""
+    value_str = str(value).strip()
+    return value_str if value_str else None
 
 
-def _get_death_info(entity: Dict[str, Any]) -> str:
-    """Create death information sentence."""
-    properties = entity.get('properties', {})
-    death_date = properties.get('deathDate')
-    if death_date:
-        return f"Died on {death_date}."
-    return ""
+def extract_entity_properties(entity: Dict[str, Any]) -> Dict[str, str]:
+    """Extract and preprocess target properties from an entity."""
+    properties = entity.get("properties", {})
+    extracted = {}
+    
+    for prop in TARGET_PROPERTIES:
+        if prop in properties:
+            processed_value = preprocess_property(properties[prop])
+            if processed_value:
+                extracted[prop] = processed_value
+    
+    return extracted
 
 
-def _get_location_info(entity: Dict[str, Any]) -> str:
-    """Create location and nationality information."""
-    properties = entity.get('properties', {})
-    parts = []
+def embed_properties(properties: Dict[str, str], model: SentenceTransformer) -> Dict[str, np.ndarray]:
+    """Generate embeddings for entity properties."""
+    embeddings = {}
     
-    nationality = properties.get('nationality')
-    if nationality:
-        if isinstance(nationality, list):
-            nationalities = [str(n) for n in nationality if n]
-            if nationalities:
-                if len(nationalities) == 1:
-                    parts.append(f"Holds {nationalities[0]} nationality.")
-                else:
-                    parts.append(f"Holds multiple nationalities: {', '.join(nationalities)}.")
-        else:
-            parts.append(f"Holds {nationality} nationality.")
-    
-    country = properties.get('country')
-    if country and country != nationality:
-        parts.append(f"Associated with {country}.")
-    
-    return " ".join(parts)
-
-
-def _get_professional_info(entity: Dict[str, Any]) -> str:
-    """Create professional information sentence."""
-    properties = entity.get('properties', {})
-    parts = []
-    
-    position = properties.get('position')
-    if position:
-        if isinstance(position, list):
-            positions = [str(p) for p in position if p]
-            if positions:
-                if len(positions) == 1:
-                    parts.append(f"Works as {positions[0]}.")
-                else:
-                    parts.append(f"Has held positions including {', '.join(positions)}.")
-        else:
-            parts.append(f"Works as {position}.")
-    
-    political = properties.get('political')
-    if political:
-        parts.append(f"Has political affiliation with {political}.")
-    
-    education = properties.get('education')
-    if education:
-        if isinstance(education, list):
-            edu_list = [str(e) for e in education if e]
-            if edu_list:
-                parts.append(f"Education includes {', '.join(edu_list)}.")
-        else:
-            parts.append(f"Education includes {education}.")
-    
-    return " ".join(parts)
-
-
-def _get_personal_info(entity: Dict[str, Any]) -> str:
-    """Create personal characteristics information."""
-    properties = entity.get('properties', {})
-    parts = []
-    
-    ethnicity = properties.get('ethnicity')
-    if ethnicity:
-        parts.append(f"Of {ethnicity} ethnicity.")
-    
-    religion = properties.get('religion')
-    if religion:
-        parts.append(f"Practices {religion}.")
-    
-    spoken_language = properties.get('spokenLanguage')
-    if spoken_language:
-        if isinstance(spoken_language, list):
-            languages = [str(l) for l in spoken_language if l]
-            if languages:
-                if len(languages) == 1:
-                    parts.append(f"Speaks {languages[0]}.")
-                else:
-                    parts.append(f"Speaks {', '.join(languages)}.")
-        else:
-            parts.append(f"Speaks {spoken_language}.")
-    
-    mother_name = properties.get('motherName')
-    if mother_name:
-        parts.append(f"Mother's name is {mother_name}.")
-    
-    appearance = properties.get('appearance')
-    if appearance:
-        parts.append(f"Physical appearance: {appearance}.")
-    
-    weight = properties.get('weight')
-    if weight:
-        parts.append(f"Weight: {weight}.")
-    
-    return " ".join(parts)
-
-
-def _get_identification_info(entity: Dict[str, Any]) -> str:
-    """Create identification information with full details."""
-    properties = entity.get('properties', {})
-    parts = []
-    
-    id_number = properties.get('idNumber')
-    if id_number:
-        parts.append(f"Official ID number: {id_number}.")
-    
-    passport_number = properties.get('passportNumber')
-    if passport_number:
-        parts.append(f"Passport number: {passport_number}.")
-    
-    tax_number = properties.get('taxNumber')
-    if tax_number:
-        parts.append(f"Tax identification number: {tax_number}.")
-    
-    return " ".join(parts)
-
-
-def create_embeddings(entities: List[Dict[str, Any]], model_name: str = "sentence-transformers/all-MiniLM-L6-v2") -> Tuple[np.ndarray, SentenceTransformer]:
-    """Generate embeddings for all entities."""
-    model = SentenceTransformer(model_name)
-    
-    documents = [preprocess_entity(entity) for entity in entities]
-    embeddings = model.encode(documents, convert_to_numpy=True)
-    
-    return embeddings, model
-
-
-def create_faiss_index(embeddings: np.ndarray) -> faiss.IndexFlatL2:
-    """Create and populate FAISS index."""
-    dimension = embeddings.shape[1]
-    index = faiss.IndexFlatL2(dimension)
-    index.add(embeddings.astype('float32'))
-    return index
-
-
-def search_similar_entities(person_id: str, embeddings_dir: Path, top_k: int = 5) -> List[Tuple[Dict[str, Any], float]]:
-    """Search for similar entities to a given person ID."""
-    # Load all data
-    entities_file = embeddings_dir / "entities.json"
-    embeddings_file = embeddings_dir / "embeddings.npy"
-    index_file = embeddings_dir / "faiss_index.bin"
-    
-    if not all(f.exists() for f in [entities_file, embeddings_file, index_file]):
-        raise FileNotFoundError("Embeddings directory missing required files. Run embed command first.")
-    
-    # Load entities and find the query entity
-    with open(entities_file, 'r') as f:
-        entities = json.load(f)
-    
-    query_entity = None
-    query_idx = None
-    for idx, entity in enumerate(entities):
-        if entity.get('id') == person_id:
-            query_entity = entity
-            query_idx = idx
-            break
-    
-    if query_entity is None:
-        raise ValueError(f"Entity with ID '{person_id}' not found in dataset")
-    
-    # Load embeddings and FAISS index
-    embeddings = np.load(embeddings_file)
-    index = faiss.read_index(str(index_file))
-    
-    # Get the query embedding
-    query_embedding = embeddings[query_idx].reshape(1, -1).astype('float32')
-    
-    # Search for similar entities (k+1 to exclude the query itself)
-    distances, indices = index.search(query_embedding, top_k + 1)
-    
-    # Prepare results (skip the first result if it's the query entity itself)
-    results = []
-    for i, (dist, idx) in enumerate(zip(distances[0], indices[0])):
-        if idx == query_idx:  # Skip the query entity itself
+    for prop, value in properties.items():
+        try:
+            embedding = model.encode(value, convert_to_numpy=True)
+            embeddings[prop] = embedding
+        except Exception as e:
+            click.echo(f"Warning: Failed to embed property '{prop}': {e}")
             continue
-        
-        similarity_score = 1.0 / (1.0 + dist)  # Convert L2 distance to similarity score
-        results.append((entities[idx], similarity_score))
-        
-        if len(results) == top_k:
-            break
     
-    return results
+    return embeddings
 
 
 @click.group()
@@ -310,109 +96,97 @@ def cli():
 
 
 @cli.command()
-@click.argument('json_file', type=click.Path(exists=True, path_type=Path))
-@click.option('--model', default="sentence-transformers/all-MiniLM-L6-v2", help="Sentence transformer model to use")
-@click.option('--output-dir', default="./embeddings", help="Directory to save embeddings and index")
+@click.argument("json_file", type=click.Path(exists=True, path_type=Path))
+@click.option(
+    "--model",
+    default="sentence-transformers/all-MiniLM-L6-v2",
+    help="Sentence transformer model to use",
+)
+@click.option(
+    "--output-dir",
+    default="./embeddings",
+    help="Directory to save embeddings and index",
+)
 def embed(json_file: Path, model: str, output_dir: str):
-    """Load FTM entities from JSONL file and create embeddings with FAISS index."""
-    output_path = Path(output_dir)
-    output_path.mkdir(exist_ok=True)
-    
+    """Embed entity properties for similarity search."""
     click.echo(f"Loading entities from {json_file}")
-    entities = []
-    with open(json_file, 'r') as f:
-        for line in f:
-            line = line.strip()
-            if line:
-                entities.append(json.loads(line))
+    entities = load_entities(json_file)
+    click.echo(f"Loaded {len(entities)} entities")
     
-    click.echo(f"Processing {len(entities)} entities...")
+    click.echo(f"Loading sentence transformer model: {model}")
+    sentence_model = SentenceTransformer(model)
     
-    # Generate stories for each entity
-    stories = []
-    for entity in entities:
-        story = preprocess_entity(entity)
-        stories.append({
-            "id": entity.get("id"),
-            "story": story
-        })
+    # Create output directory
+    output_path = Path(output_dir)
+    output_path.mkdir(parents=True, exist_ok=True)
     
-    # Create embeddings
-    embeddings, transformer_model = create_embeddings(entities, model)
-    click.echo(f"Generated embeddings with shape: {embeddings.shape}")
+    # Store entity embeddings and metadata
+    entity_embeddings = {}
+    entity_metadata = {}
     
-    # Create FAISS index
-    index = create_faiss_index(embeddings)
-    click.echo(f"Created FAISS index with {index.ntotal} vectors")
+    click.echo("Processing entities and generating embeddings...")
+    with click.progressbar(entities) as bar:
+        for entity in bar:
+            entity_id = entity.get("id")
+            if not entity_id:
+                continue
+                
+            # Extract and preprocess properties
+            properties = extract_entity_properties(entity)
+            if not properties:
+                continue
+                
+            # Generate embeddings for each property
+            embeddings = embed_properties(properties, sentence_model)
+            if embeddings:
+                entity_embeddings[entity_id] = embeddings
+                entity_metadata[entity_id] = {
+                    "original_data": entity,
+                    "properties": properties
+                }
     
-    # Save everything
-    entities_file = output_path / "entities.json"
-    stories_file = output_path / "stories.json"
-    embeddings_file = output_path / "embeddings.npy"
-    index_file = output_path / "faiss_index.bin"
+    click.echo(f"Generated embeddings for {len(entity_embeddings)} entities")
     
-    with open(entities_file, 'w') as f:
-        json.dump(entities, f, indent=2)
+    # Save embeddings and metadata
+    embeddings_file = output_path / "embeddings.pkl"
+    metadata_file = output_path / "metadata.pkl"
+    weights_file = output_path / "weights.pkl"
     
-    with open(stories_file, 'w') as f:
-        json.dump(stories, f, indent=2)
+    with open(embeddings_file, 'wb') as f:
+        pickle.dump(entity_embeddings, f)
     
-    np.save(embeddings_file, embeddings)
-    faiss.write_index(index, str(index_file))
+    with open(metadata_file, 'wb') as f:
+        pickle.dump(entity_metadata, f)
+        
+    with open(weights_file, 'wb') as f:
+        pickle.dump(PROPERTY_WEIGHTS, f)
     
-    click.echo(f"Saved entities to: {entities_file}")
-    click.echo(f"Saved stories to: {stories_file}")
-    click.echo(f"Saved embeddings to: {embeddings_file}")
-    click.echo(f"Saved FAISS index to: {index_file}")
-    click.echo(f"Vector store created successfully with {len(entities)} entities!")
+    click.echo(f"Saved embeddings to {embeddings_file}")
+    click.echo(f"Saved metadata to {metadata_file}")
+    click.echo(f"Saved weights to {weights_file}")
+    
+    # Print some statistics
+    property_counts = {}
+    for embeddings in entity_embeddings.values():
+        for prop in embeddings.keys():
+            property_counts[prop] = property_counts.get(prop, 0) + 1
+    
+    click.echo("\nProperty coverage:")
+    for prop, count in sorted(property_counts.items(), key=lambda x: x[1], reverse=True):
+        percentage = (count / len(entity_embeddings)) * 100
+        click.echo(f"  {prop}: {count} entities ({percentage:.1f}%)")
 
 
 @cli.command()
-@click.argument('person_id')
-@click.option('--embeddings-dir', default="./embeddings", help="Directory containing embeddings and index")
-@click.option('--top-k', default=5, help="Number of similar entities to return")
+@click.argument("person_id")
+@click.option(
+    "--embeddings-dir",
+    default="./embeddings",
+    help="Directory containing embeddings and index",
+)
+@click.option("--top-k", default=5, help="Number of similar entities to return")
 def search(person_id: str, embeddings_dir: str, top_k: int):
-    """Search for entities similar to the given person ID."""
-    try:
-        embeddings_path = Path(embeddings_dir)
-        results = search_similar_entities(person_id, embeddings_path, top_k)
-        
-        click.echo(f"\nTop {len(results)} entities similar to '{person_id}':")
-        click.echo("=" * 60)
-        
-        for i, (entity, score) in enumerate(results, 1):
-            entity_id = entity.get('id', 'Unknown')
-            properties = entity.get('properties', {})
-            name = properties.get('name') or _get_full_name(entity) or 'Unnamed'
-            
-            click.echo(f"\n{i}. {entity_id} (Similarity: {score:.4f})")
-            click.echo(f"   Name: {name}")
-            
-            # Show key details
-            details = []
-            if properties.get('birthDate'):
-                details.append(f"Born: {properties['birthDate']}")
-            if properties.get('nationality'):
-                details.append(f"Nationality: {properties['nationality']}")
-            if properties.get('position'):
-                details.append(f"Position: {properties['position']}")
-            
-            if details:
-                click.echo(f"   Details: {' | '.join(details)}")
-            
-            # Show preprocessing story for context
-            story = preprocess_entity(entity)
-            if len(story) > 150:
-                story = story[:150] + "..."
-            click.echo(f"   Story: {story}")
-            
-    except FileNotFoundError as e:
-        click.echo(f"Error: {e}", err=True)
-        click.echo("Run 'python main.py embed <json_file>' first to create embeddings.", err=True)
-    except ValueError as e:
-        click.echo(f"Error: {e}", err=True)
-    except Exception as e:
-        click.echo(f"Unexpected error: {e}", err=True)
+    pass
 
 
 if __name__ == "__main__":
