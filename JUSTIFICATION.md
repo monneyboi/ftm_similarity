@@ -4,6 +4,8 @@ I'm pre-computing composite properties (only "name" in this case). Depending on 
 
 I think we could improve upon this tactic by taking into account the relations of entities in our dataset, as there is only so much similar properties can tell you.
 
+In the real world i would have a step before similarity search that matches on rules, mostly to filter out entities that we can be sure are similar, like persons with matching passport numbers etc.
+
 **2. Explain your choices for embedding the entities and your choice of vector store. Explain how you might improve this, given more time and a greater variety and amount of entities.**
 
 In this demo, everything is dumped into pickle files, in the real world we'd have to use a serious vector database.
