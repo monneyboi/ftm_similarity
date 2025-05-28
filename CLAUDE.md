@@ -63,3 +63,10 @@ user know what packages you need and what commands can be run.
 - **main.py**: Entry point containing the main() function
 - **pyproject.toml**: Project configuration and dependencies (currently minimal)
 - Python 3.12+ required
+
+## Example of the input data
+
+```
+{"id": "person1", "schema": "Person", "properties": {"name": "John Smith", "country": "US", "nationality": "US", "birthDate": "1975-06-15", "birthPlace": "Boston, MA", "idNumber": "SSN-123-45-6789", "education": "Harvard University 1997", "political": "Democratic Party", "appearance": "Tall, athletic build, salt-and-pepper hair", "description": "Former investment banker who transitioned to politics"}}
+{"id": "person2", "schema": "Person", "properties": {"firstName": "Jean", "lastName": "Dupont", "country": "FR", "nationality": "FR", "birthDate": "1982-03-22", "passportNumber": "FR12345678", "education": "Sciences Po Paris 2004", "political": "La République En Marche", "appearance": "Well-dressed, distinguished appearance, always in tailored suits", "description": "Tech entrepreneur who founded successful AI startup"}}
+```
